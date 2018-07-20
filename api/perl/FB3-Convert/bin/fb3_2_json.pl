@@ -559,10 +559,20 @@ sub ProceedDescr {
 
 	my $description = join ',', @description_data;
 
-#	my $descr_info = {
-#		'sequence'     => 'fb3d:sequence',
-#		'linked_arts'  => ' fb3d:fb3-relations/fb3d:object',
-#	};
+	my @Sequences = ();
+	my $getSequence; $getSequence = sub {
+
+		my @sequenceNodes = @_;
+
+		for my $sequenceNode ( @sequenceNodes ) {
+
+			push @Sequences, '"' . EscString($xpc->findnodes('./fbd:title/fbd:main', $sequenceNode)->[0]->string_value) . '"';
+
+			$getSequence->( $xpc->findnodes('./fbd:sequence', $sequenceNode) );
+		}
+	};
+	$getSequence->( $xpc->findnodes('/fbd:fb3-description/fbd:sequence') );
+	$description .= ',Sequence:[' . join(',', @Sequences) . ']' if scalar @Sequences;
 
 	my $getParts = sub {
 
@@ -611,6 +621,17 @@ sub ProceedDescr {
 		push @Translators, '{Role:"translator",' . $getAuthorNamePart->($Translator) . '}';
 	}
 	$description .= ',Translators:[' . (join ",", @Translators) . ']' if scalar @Translators;
+
+	my @Relations;
+	for my $ObjectNode ($xpc->findnodes('/fbd:fb3-description/fbd:fb3-relations/fbd:object')) {
+
+		my $ObjectId    = EscString( $ObjectNode->getAttribute('id') );
+		my $ObjectType  = EscString( $ObjectNode->getAttribute('link') );
+		my $ObjectTitle = EscString($xpc->findnodes('./fbd:title/fbd:main', $ObjectNode)->[0]->string_value);
+
+		push @Relations, sprintf('{id:"%s",type:"%s",title:"%s"}', $ObjectId, $ObjectType, $ObjectTitle);
+	}
+	$description .= ',Relations:[' . (join ",", @Relations) . ']' if scalar @Relations;
 
 	$description .= ',ArtID:"' . EscString($ArtID) . '"' if $ArtID;
 
