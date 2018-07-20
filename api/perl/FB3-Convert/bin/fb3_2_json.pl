@@ -18,13 +18,15 @@ my $FB3     = $ARGV[0];
 my $Out     = $ARGV[1];
 my $Version = $ARGV[2];
 my $Lang    = $ARGV[3] || 'ru';
+my $ArtID   = $ARGV[4] || undef;
 
 $Out = $Out.'/' unless $Out =~ /\/$/;
-$Version = 1 if $Version =~/[\D\.]/;
-$Version="1.$Version" unless $Version=~/^\d+\.\d+$/;
+
+$Version = '1.0' if ( not $Version or $Version =~ /[\D\.]/ );
+$Version = "1.$Version" unless $Version =~ /^\d+\.\d+$/;
 
 my $PartLimit = 20000;
-my $IsTrial = 0;
+my $IsTrial   = 0;
 
 use constant {
 	RELATION_TYPE_FB3_BOOK =>
@@ -524,48 +526,101 @@ sub ProceedJsonBodyPart {
 }
 
 sub ProceedDescr {
+
 	my $DescrXML = shift;
 
 	$DescrXML = DecodeUtf8($DescrXML);
 	$DescrXML =~ s/\r?\n\r?/ /g;
 
+	my @description_data = ();
+
 	my $Parser = XML::LibXML->new();
 	my $xpc = XML::LibXML::XPathContext->new($Parser->load_xml( string => $DescrXML, huge => 1 ));
 	$xpc->registerNs('fbd', &NS_FB3_DESCRIPTION);
 
-	my $BookNameNode = $xpc->findnodes('/fbd:fb3-description/fbd:title/fbd:main')->[0];
-	my $BookName = $BookNameNode->string_value if $BookNameNode;
-	$BookName = EscString($BookName);
-
 	my $UUID = ($xpc->findnodes('/fbd:fb3-description')->[0])->getAttribute('id');
+
+	my $SimpleFields = {
+		'Title'        => 'fbd:title/fbd:main',
+		'Subtitle'     => 'fbd:title/fbd:sub',
+		'Lang'         => 'fbd:lang',
+		'Annotation'   => 'fbd:annotation',
+		'Preamble'     => 'fbd:preamble',
+		'Translated'   => 'fbd:translated'
+	};
+
+	for my $field ( sort keys %$SimpleFields ) {
+
+		my $node  = $xpc->findnodes('/fbd:fb3-description/' . $SimpleFields->{$field})->[0]  || next;
+		my $value = EscString($node->string_value) || next;
+
+		push @description_data, sprintf('%s:"%s"', $field, $value);
+	}
+
+	my $description = join ',', @description_data;
+
+#	my $descr_info = {
+#		'sequence'     => 'fb3d:sequence',
+#		'linked_arts'  => ' fb3d:fb3-relations/fb3d:object',
+#	};
+
+	my $getParts = sub {
+
+		my $node   = shift;
+		my $struct = shift;
+
+		my @values = ();
+
+		for my $part ( keys %$struct ) {
+
+			my $subNode = $xpc->findnodes('./fbd:' . $struct->{$part}, $node)->[0] || next;
+			my $value   = EscString($subNode->string_value) || next;
+
+			push @values, sprintf('%s:"%s"', $part, $value);
+		}
+
+		return join(',', @values);
+	};
+
+	my $getAuthorNamePart = sub {
+
+		my $node = shift;
+
+		my $NameParts = {'First' => 'first-name', 'Last' => 'last-name', 'Middle' => 'middle-name'};
+
+		return $getParts->($node, $NameParts);
+	};
+
+	if ( my $WrittenNode = $xpc->findnodes('/fbd:fb3-description/fbd:written')->[0] ) {
+
+		my $WrittenParts = {'Date' => 'date', 'DatePublic' => 'date-public', 'Lang' => 'lang'};
+		my $Written =  $getParts->($WrittenNode, $WrittenParts);
+		$description .= ',Written:{' . $Written . '}' if scalar $Written;
+	}
 
 	my @Authors;
 	foreach (@AuthorsPriority) {
 		for my $Author ($xpc->findnodes('/fbd:fb3-description/fbd:fb3-relations/fbd:subject[@link="'.$_.'"]')) {
-			my $AuthorFirstNameNode = $xpc->findnodes('./fbd:first-name', $Author)->[0];
-			my $AuthorFirstName = $AuthorFirstNameNode->string_value if $AuthorFirstNameNode;
-			$AuthorFirstName = EscString($AuthorFirstName);
-
-			my $AuthorLastNameNode = $xpc->findnodes('./fbd:last-name', $Author)->[0];
-			my $AuthorLastName = $AuthorLastNameNode->string_value if $AuthorLastNameNode;
-			$AuthorLastName = EscString($AuthorLastName);
-
-			my $AuthorMiddleNameNode = $xpc->findnodes('./fbd:middle-name', $Author)->[0];
-			my $AuthorMiddleName = $AuthorMiddleNameNode->string_value if $AuthorMiddleNameNode;
-			$AuthorMiddleName = EscString($AuthorMiddleName);
-			push @Authors, '{Role:"'.$_.'",First:"'.$AuthorFirstName.'",Last:"'.$AuthorLastName.'",Middle:"'.$AuthorMiddleName.'"}';
+			push @Authors, '{Role:"' . $_ . '",' . $getAuthorNamePart->($Author) . '}';
 		}
 	}
+	$description .= ',Authors:[' . (join ",", @Authors) . ']' if scalar @Authors;
 
-	my $FragmentNode = $xpc->findnodes('/fbd:fb3-description/fbd:fb3-fragment')->[0];
+	my @Translators;
+	for my $Translator ($xpc->findnodes('/fbd:fb3-description/fbd:fb3-relations/fbd:subject[@link="translator"]')) {
+		push @Translators, '{Role:"translator",' . $getAuthorNamePart->($Translator) . '}';
+	}
+	$description .= ',Translators:[' . (join ",", @Translators) . ']' if scalar @Translators;
+
+	$description .= ',ArtID:"' . EscString($ArtID) . '"' if $ArtID;
+
 	my $FragmentStr = '';
-	if ($FragmentNode) {
+	if ( my $FragmentNode = $xpc->findnodes('/fbd:fb3-description/fbd:fb3-fragment')->[0] ) {
 		$IsTrial = 1;
 		$FragmentStr = ",\n".'"fb3-fragment":{"full_length":'.$FragmentNode->getAttribute('full_length').',"fragment_length":'.$FragmentNode->getAttribute('fragment_length').'}';
 	}
 	
-	my $HeaderStr = 'Meta:{Title:"'.$BookName.'",UUID:"'.$UUID.'",version:"'.$Version.'",Authors:['.(join ",", @Authors).']}'.$FragmentStr.",\n";
-	return $HeaderStr;
+	return 'Meta:{' . $description . ',UUID:"' . $UUID . '",version:"' . $Version . '"}' . $FragmentStr . ",\n";
 }
 
 sub DecodeUtf8 {
