@@ -572,7 +572,7 @@ sub ProceedDescr {
 		}
 	};
 	$getSequence->( $xpc->findnodes('/fbd:fb3-description/fbd:sequence') );
-	$description .= ',Sequence:[' . join(',', @Sequences) . ']' if scalar @Sequences;
+	$description .= ',Sequences:[' . join(',', @Sequences) . ']' if scalar @Sequences;
 
 	my $getParts = sub {
 
