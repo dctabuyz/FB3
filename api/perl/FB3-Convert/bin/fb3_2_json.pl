@@ -14,11 +14,31 @@ use File::Copy;
 use File::Basename;
 use MIME::Base64;
 
-my $FB3     = $ARGV[0];
-my $Out     = $ARGV[1];
-my $Version = $ARGV[2];
-my $Lang    = $ARGV[3] || 'ru';
-my $ArtID   = $ARGV[4] || undef;
+use Getopt::Long;
+
+my $FB3     = '';
+my $Out     = '';
+my $Version = '1.0';
+my $Lang    = 'ru';
+my $ArtID   = undef;
+
+# my $FB3     = $ARGV[0];
+# my $Out     = $ARGV[1];
+# my $Version = $ARGV[2];
+# my $Lang    = $ARGV[3] || 'ru';
+# my $ArtID   = $ARGV[4] || undef;
+
+GetOptions ('in|fb3=s'     => \$FB3,
+            'out|json=s'   => \$Out,
+            'lang=s'       => \$Lang,
+            'art|art-id=s' => \$ArtID,
+            'version=s'    => \$Version) or print join('', <DATA>) and die("Error in command line arguments\n");
+
+print join('', <DATA>) and die "ERROR: source directory not specified, use --fb3 parameter\n"       unless $FB3;
+print join('', <DATA>) and die "ERROR: destination directory not specified, use --json parameter\n" unless $Out;
+
+die "\nERROR: source directory `$FB3' not found\n"      unless -d $FB3;
+die "\nERROR: destination directory `$Out' not found\n" unless -d $Out;
 
 $Out = $Out.'/' unless $Out =~ /\/$/;
 
@@ -785,3 +805,19 @@ sub Hyphenate {
 }
 
 1;
+
+__DATA__
+
+Usage:
+
+    fb3_2_json.pl --fb3 /path/to/fb3/dir --json /path/to/json/dir [ --version <file version> ] [ --lang <file language> ] [ --art-id <id> ]
+
+e.g.
+
+    fb3_2_json.pl --fb3 /tmp/fb3 --json /tmp/json
+
+    fb3_2_json.pl --fb3 /tmp/fb3 --json /tmp/json --lang ru --art-id 1234567
+
+    fb3_2_json.pl --fb3 /tmp/fb3 --json /tmp/json --version 2.1 --lang es --art-id 1234567
+
+
